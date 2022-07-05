@@ -371,7 +371,6 @@ INPUT > TRANSFORMATION (PYSPARK Aggregations) > OUTPUT
 ETL_PROJECT_FINAL > DATA TRANSFORMATION > ETL_PROJECT_ANALYTICS
 
 # Pyspark Code
-# ------------
 
 from pyspark.sql import SparkSession
 from pyspark import SparkContext
@@ -425,7 +424,7 @@ def main():
     df_covid_19 = spark.read \
         .format(sn_src_name) \
         .options(**sn_options_reading) \
-   .option("dbtable",sn_db_reading+"."+sn_schema+"."+src_tb_reading_c19) \
+    .option("dbtable",sn_db_reading+"."+sn_schema+"."+src_tb_reading_c19) \
         .load()
     
     # Transformation Dataframe Covid_19
@@ -481,10 +480,7 @@ def main():
         .save()
     
     print(" ***** Half Yearly Data Transfer Completed ******")
-
-
-
-
+    
 main()
 
 
