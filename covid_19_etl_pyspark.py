@@ -42,9 +42,9 @@ def main():
     
     ''' Options For Writing Data '''
     sn_options_writing = {
-        "sfUrl": "https://dm59907.us-east-2.aws.snowflakecomputing.com",
-        "sfUser": "cheekushivam",
-        "sfPassword": "Pediasure1#",
+        "sfUrl": "https://**********.aws.snowflakecomputing.com",
+        "sfUser": "************",
+        "sfPassword": "**********",
         "sfDatabase": sn_db_writing,
         "sfSchema": sn_schema,
         "sfWarehouse": "COMPUTE_WH"
