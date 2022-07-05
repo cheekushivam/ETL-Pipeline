@@ -1,0 +1,539 @@
+create storage integration s3_int
+  type = external_stage,
+  storage_provider = s3,
+  enabled = true,
+  storage_aws_role_arn = 'arn:aws:iam::681515040523:role/etlprojectrole',
+  storage_allowed_locations = ('s3://snowflakecoviddata/');
+  
+show integrations;
+
+DESCRIBE integration S3_INT;
+
+select system$get_aws_sns_iam_policy('arn:aws:sns:us-east-2:681515040523:etl_covid');
+
+-- Create staging table queries --
+-------------------------------------------------------------------------
+
+Create database ETL_PROJECT_STAGING;
+
+create or replace TABLE ETL_PROJECT_STAGING.PUBLIC.COVID_19 (
+	SNO NUMBER(38,0) autoincrement,
+	REPORTEDDATE VARCHAR(100),
+	STATE VARCHAR(50),
+	CONFIRMEDINDIANNATIONAL NUMBER(38,0),
+	CONFIRMEDFOREIGNNATIONAL NUMBER(38,0),
+	CURED NUMBER(38,0),
+	DEATHS NUMBER(38,0),
+	CONFIRMED NUMBER(38,0)
+)
+COMMENT='This is covid_19 India Data';
+
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19 drop REPORTEDDATE;
+-- ALter table ETL_PROJECT_STAGING.PUBLIC.COVID_19 add REPORTEDDATE Date;
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19 drop REPORTEDTIME;
+-- ALter table ETL_PROJECT_STAGING.PUBLIC.COVID_19 ADD REPORTEDTIME Time;
+
+create or replace TABLE ETL_PROJECT_STAGING.PUBLIC.COVID_19_Vaccine_Statewise (
+	UPDATEDON VARCHAR(100),
+	STATE VARCHAR(50),
+	TOTALDOSESADMINISTERED NUMBER(38,0),
+    FIRSTDOSESADMINISTERED NUMBER(38,0),
+    SECONDDOSESADMINISTERED NUMBER(38,0),
+    MALEDOSESADMINISTERED NUMBER(38,0),
+    FEMALEDOSESADMINISTERED NUMBER(38,0),
+    TRANSGENDERDOSESADMINISTERED NUMBER(38,0),
+    COVAXINDOSESADMINISTERED NUMBER(38,0),
+    COVISHEILDDOSESADMINISTERED NUMBER(38,0),
+    SPUTNIKDOSESADMINISTERED NUMBER(38,0),
+    Age_18_44YEARSVACCINATED NUMBER(38,0),
+    Age_45_60_YEARSVACCINATED NUMBER(38,0),
+    Age_60_125_YEARSVACCINATED NUMBER(38,0),
+    MALEVACCINATED NUMBER(38,0),
+    FEMALEVACCINATED NUMBER(38,0),
+    TRANSGENDERVACCINATED NUMBER(38,0),
+    TOTALVACCINATED NUMBER(38,0)
+)
+COMMENT='This is covid_19 Vaccination Statewise India Data';
+
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19_Vaccine_Statewise drop UPDATEDON;
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19_Vaccine_Statewise add UPDATEDON Date;
+
+create or replace TABLE ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS (
+	TESTINGDATE VARCHAR(100),
+	STATE VARCHAR(50),
+	TOTALSAMPLE NUMBER(38,0),
+	NEGATIVE NUMBER(38,0),
+	POSITIVE NUMBER(38,0)
+)
+COMMENT='This is covid_19 Statewise Testing Details India Data';
+
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS drop TESTINGDATE;
+-- Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS add TESTINGDATE Date;
+
+-- Alter database if exists ETL_PROJECT rename to ETL_PROJECT_STAGING;
+
+show schemas;
+
+Create file format ETL_PROJECT_STAGING.PUBLIC.COVID_CSV
+type = 'csv',
+field_delimiter = ',',
+record_delimiter = '\n',
+skip_header = 1,
+field_optionally_enclosed_by = '\042',
+null_if = ('\\N');
+
+create or replace stage covid_s3_stage
+  storage_integration = S3_INT
+  url = 's3://snowflakecoviddata/covid_19/'
+  file_format = ETL_PROJECT_STAGING.PUBLIC.COVID_CSV;
+  
+create or replace stage covid_vaccine_s3_stage
+  storage_integration = S3_INT
+  url = 's3://snowflakecoviddata/covid_19_vaccine/'
+  file_format = ETL_PROJECT_STAGING.PUBLIC.COVID_CSV;
+  
+create or replace stage covid_statewise_s3_stage
+  storage_integration = S3_INT
+  url = 's3://snowflakecoviddata/covid_19_statewise/'
+  file_format = ETL_PROJECT_STAGING.PUBLIC.COVID_CSV;
+  
+show stages;
+
+list @covid_s3_stage;
+list @covid_vaccine_s3_stage;
+list @covid_statewise_s3_stage;
+
+create or replace pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19
+auto_ingest = true,
+aws_sns_topic = 'arn:aws:sns:us-east-2:681515040523:etl_covid'
+as
+copy into ETL_PROJECT_STAGING.PUBLIC.COVID_19 
+from @ETL_PROJECT_STAGING.PUBLIC.covid_s3_stage
+file_format = ETL_PROJECT_STAGING.PUBLIC.covid_csv;
+
+create or replace pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_Vaccine
+auto_ingest = true,
+aws_sns_topic = 'arn:aws:sns:us-east-2:681515040523:etl_covid'
+as
+copy into ETL_PROJECT_STAGING.PUBLIC.COVID_19_VACCINE_STATEWISE
+from @ETL_PROJECT_STAGING.PUBLIC.covid_vaccine_s3_stage
+file_format = ETL_PROJECT_STAGING.PUBLIC.covid_csv;
+
+create or replace pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_statewise
+auto_ingest = true,
+aws_sns_topic = 'arn:aws:sns:us-east-2:681515040523:etl_covid'
+as
+copy into ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS
+from @ETL_PROJECT_STAGING.PUBLIC.covid_statewise_s3_stage
+file_format = ETL_PROJECT_STAGING.PUBLIC.covid_csv;
+
+SHOW PIPES;
+
+--- Queries to check pipe status whether it is running or resumed.
+Select system$pipe_status('ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_statewise');
+Select system$pipe_status('ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_Vaccine');
+Select system$pipe_status('ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19');
+
+-- Queries to resume pipe status if we want to delete pipe, as we cannot delete pipe if it is running status.
+alter pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_Vaccine set pipe_execution_paused = true;
+alter pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_statewise set pipe_execution_paused = true;
+alter pipe ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19 set pipe_execution_paused = true;
+
+-- Select * from ETL_PROJECT_STAGING.PUBLIC.COVID_19;
+-- Select * from ETL_PROJECT_STAGING.PUBLIC.COVID_19_VACCINE_STATEWISE;
+
+-- -------------------Create Final Table Queries -----------------------------------------------------------------------------
+
+Create database ETL_PROJECT_FINAL;
+
+create or replace TABLE ETL_PROJECT_FINAL.PUBLIC.COVID_19 (
+SNO NUMBER(38,0) autoincrement,
+	REPORTEDDATE VARCHAR(100),
+	STATE VARCHAR(50),
+	CONFIRMEDINDIANNATIONAL NUMBER(38,0),
+	CONFIRMEDFOREIGNNATIONAL NUMBER(38,0),
+	CURED NUMBER(38,0),
+	DEATHS NUMBER(38,0),
+	CONFIRMED NUMBER(38,0)
+)
+COMMENT='This is covid_19 India Data';
+
+create or replace TABLE ETL_PROJECT_FINAL.PUBLIC.COVID_19_Vaccine_Statewise (
+	UPDATEDON VARCHAR(100),
+	STATE VARCHAR(50),
+	TOTALDOSESADMINISTERED NUMBER(38,0),
+    FIRSTDOSESADMINISTERED NUMBER(38,0),
+    SECONDDOSESADMINISTERED NUMBER(38,0),
+    MALEDOSESADMINISTERED NUMBER(38,0),
+    FEMALEDOSESADMINISTERED NUMBER(38,0),
+    TRANSGENDERDOSESADMINISTERED NUMBER(38,0),
+    COVAXINDOSESADMINISTERED NUMBER(38,0),
+    COVISHEILDDOSESADMINISTERED NUMBER(38,0),
+    SPUTNIKDOSESADMINISTERED NUMBER(38,0),
+    Age_18_44YEARSVACCINATED NUMBER(38,0),
+    Age_45_60_YEARSVACCINATED NUMBER(38,0),
+    Age_60_125_YEARSVACCINATED NUMBER(38,0),
+    MALEVACCINATED NUMBER(38,0),
+    FEMALEVACCINATED NUMBER(38,0),
+    TRANSGENDERVACCINATED NUMBER(38,0),
+    TOTALVACCINATED NUMBER(38,0)
+)
+COMMENT='This is covid_19 Vaccination Statewise India Data';
+
+create or replace TABLE ETL_PROJECT_FINAL.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS (
+	TESTINGDATE VARCHAR(100),
+	STATE VARCHAR(50),
+	TOTALSAMPLE NUMBER(38,0),
+	NEGATIVE NUMBER(38,0),
+	POSITIVE NUMBER(38,0)
+)
+COMMENT='This is covid_19 Statewise Testing Details India Data';
+
+-- 1. Perform History Load of Data TO STAGING AND FINAL TABLES
+ 
+ Insert into ETL_PROJECT_FINAL.PUBLIC.COVID_19(
+    SNO,
+	REPORTEDDATE,
+	STATE,
+	CONFIRMEDINDIANNATIONAL,
+	CONFIRMEDFOREIGNNATIONAL,
+	CURED,
+	DEATHS,
+	CONFIRMED)
+    Select * from ETL_PROJECT_STAGING.PUBLIC.COVID_19;
+    
+ Insert into ETL_PROJECT_FINAL.PUBLIC.COVID_19_Vaccine_Statewise(
+    UPDATEDON,
+	STATE,
+	TOTALDOSESADMINISTERED,
+    FIRSTDOSESADMINISTERED,
+    SECONDDOSESADMINISTERED,
+    MALEDOSESADMINISTERED,
+    FEMALEDOSESADMINISTERED,
+    TRANSGENDERDOSESADMINISTERED,
+    COVAXINDOSESADMINISTERED,
+    COVISHEILDDOSESADMINISTERED,
+    SPUTNIKDOSESADMINISTERED,
+    Age_18_44YEARSVACCINATED,
+    Age_45_60_YEARSVACCINATED,
+    Age_60_125_YEARSVACCINATED,
+    MALEVACCINATED,
+    FEMALEVACCINATED,
+    TRANSGENDERVACCINATED,
+    TOTALVACCINATED)
+    Select * from ETL_PROJECT_STAGING.PUBLIC.COVID_19_Vaccine_Statewise;
+    
+ Insert into ETL_PROJECT_FINAL.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS(
+    TESTINGDATE,
+	STATE,
+	TOTALSAMPLE,
+	NEGATIVE,
+	POSITIVE)
+    Select * from ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS;
+    
+Select * from ETL_PROJECT_FINAL.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS;
+
+-- 2. Define stream for each table in staging to capture data change that is coming from aws after history load
+
+Create stream ETL_PROJECT_STAGING.PUBLIC.covid_19_stream on table ETL_PROJECT_STAGING.PUBLIC.COVID_19
+append_only = true;
+
+Create stream ETL_PROJECT_STAGING.PUBLIC.covid_19_vaccine_statewise_stream on table ETL_PROJECT_STAGING.PUBLIC.COVID_19_Vaccine_Statewise
+append_only = true;
+
+Create stream ETL_PROJECT_STAGING.PUBLIC.covid_19_statewise_testing_stream on table ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS
+append_only = true;
+
+Describe stream ETL_PROJECT_STAGING.PUBLIC.covid_19_stream;
+Describe stream ETL_PROJECT_STAGING.PUBLIC.covid_19_stream;
+Describe stream ETL_PROJECT_STAGING.PUBLIC.covid_19_stream;
+
+-- 3. Define 3 Task in staging to merge data to final
+
+/*
+covid_19 Table Task Logic
+-------------------------
+
+check fields:
+Reported Date
+State
+
+Logic:
+If Reported Date and State pair is not available then new record insertion
+If Reported Date and State pair is available then update data
+
+COVID_19_STATEWISE_TESTING_DETAILS Table Task Logic
+----------------------------------------------------
+
+check fields:
+Testing Date
+State
+
+Logic:
+If TestingDate and State pair is not available then new record insertion
+If TestingDate and State pair is available then update data
+
+COVID_19_VACCINE_STATEWISE Table Task Logic
+-------------------------------------------
+
+check fields:
+UPDATED ON
+State
+
+Logic:
+If UPDATEON and State pair is not available then new record insertion
+If UPDATEDON and State pair is available then update data
+*/
+
+Create or replace task task_covid_19
+    WAREHOUSE  = compute_wh
+    SCHEDULE  = '1 MINUTE'
+WHEN
+  SYSTEM$STREAM_HAS_DATA('ETL_PROJECT_STAGING.PUBLIC.covid_19_stream')
+As
+merge into ETL_PROJECT_FINAL.PUBLIC.COVID_19 cov_final
+using ETL_PROJECT_STAGING.PUBLIC.covid_19_stream cov_stg_stream on
+cov_stg_stream.REPORTEDDATE = cov_final.REPORTEDDATE and
+cov_stg_stream.state = cov_final.state
+when matched
+    then update set
+cov_final.CONFIRMEDINDIANNATIONAL = cov_stg_stream.CONFIRMEDINDIANNATIONAL,
+cov_final.CONFIRMEDFOREIGNNATIONAL = cov_stg_stream.CONFIRMEDFOREIGNNATIONAL,
+cov_final.CURED = cov_stg_stream.CURED,
+cov_final.DEATHS = cov_stg_stream.DEATHS,
+cov_final.CONFIRMED = cov_stg_stream.CONFIRMED
+when not matched
+    then insert (
+    REPORTEDDATE,
+	STATE,
+	CONFIRMEDINDIANNATIONAL,
+	CONFIRMEDFOREIGNNATIONAL,
+	CURED,
+	DEATHS,
+	CONFIRMED
+    )
+    Values(
+        cov_stg_stream.REPORTEDDATE,
+        cov_stg_stream.STATE,
+        cov_stg_stream.CONFIRMEDINDIANNATIONAL,
+        cov_stg_stream.CONFIRMEDFOREIGNNATIONAL,
+        cov_stg_stream.CURED,
+        cov_stg_stream.DEATHS,
+        cov_stg_stream.CONFIRMED
+    );
+    
+create or replace task task_covid_19_vaccine_statewise
+WAREHOUSE = compute_wh
+SCHEDULE = '2 minute'
+WHEN
+  SYSTEM$STREAM_HAS_DATA('ETL_PROJECT_STAGING.PUBLIC.covid_19_vaccine_statewise_stream')
+AS
+merge into ETL_PROJECT_FINAL.PUBLIC.COVID_19_Vaccine_Statewise cov_vacc_final
+using ETL_PROJECT_STAGING.PUBLIC.covid_19_vaccine_statewise_stream cov_vacc_stg_stream
+on cov_vacc_stg_stream.STATE = cov_vacc_final.STATE and
+cov_vacc_stg_stream.UPDATEDON = cov_vacc_final.UPDATEDON
+When matched
+    then update set
+    cov_vacc_final.TOTALDOSESADMINISTERED = cov_vacc_stg_stream.TOTALDOSESADMINISTERED,
+    cov_vacc_final.FIRSTDOSESADMINISTERED = cov_vacc_stg_stream.FIRSTDOSESADMINISTERED,
+    cov_vacc_final.SECONDDOSESADMINISTERED = cov_vacc_stg_stream.SECONDDOSESADMINISTERED,
+    cov_vacc_final.MALEDOSESADMINISTERED = cov_vacc_stg_stream.MALEDOSESADMINISTERED,
+    cov_vacc_final.FEMALEDOSESADMINISTERED = cov_vacc_stg_stream.FEMALEDOSESADMINISTERED,
+    cov_vacc_final.TRANSGENDERDOSESADMINISTERED = cov_vacc_stg_stream.TRANSGENDERDOSESADMINISTERED,
+    cov_vacc_final.COVAXINDOSESADMINISTERED = cov_vacc_stg_stream.COVAXINDOSESADMINISTERED,
+    cov_vacc_final.COVISHEILDDOSESADMINISTERED = cov_vacc_stg_stream.COVISHEILDDOSESADMINISTERED,
+    cov_vacc_final.SPUTNIKDOSESADMINISTERED = cov_vacc_stg_stream.SPUTNIKDOSESADMINISTERED,
+    cov_vacc_final.Age_18_44YEARSVACCINATED = cov_vacc_stg_stream.Age_18_44YEARSVACCINATED,
+    cov_vacc_final.Age_45_60_YEARSVACCINATED = cov_vacc_stg_stream.Age_45_60_YEARSVACCINATED,
+    cov_vacc_final.Age_60_125_YEARSVACCINATED = cov_vacc_stg_stream.Age_60_125_YEARSVACCINATED,
+    cov_vacc_final.MALEVACCINATED = cov_vacc_stg_stream.MALEVACCINATED,
+    cov_vacc_final.FEMALEVACCINATED = cov_vacc_stg_stream.FEMALEVACCINATED,
+    cov_vacc_final.TRANSGENDERVACCINATED = cov_vacc_stg_stream.TRANSGENDERVACCINATED,
+    cov_vacc_final.TOTALVACCINATED = cov_vacc_stg_stream.TOTALVACCINATED
+When not matched 
+    then insert(
+    UPDATEDON,
+	STATE,
+	TOTALDOSESADMINISTERED,
+    FIRSTDOSESADMINISTERED,
+    SECONDDOSESADMINISTERED,
+    MALEDOSESADMINISTERED,
+    FEMALEDOSESADMINISTERED,
+    TRANSGENDERDOSESADMINISTERED,
+    COVAXINDOSESADMINISTERED,
+    COVISHEILDDOSESADMINISTERED,
+    SPUTNIKDOSESADMINISTERED,
+    Age_18_44YEARSVACCINATED,
+    Age_45_60_YEARSVACCINATED,
+    Age_60_125_YEARSVACCINATED,
+    MALEVACCINATED,
+    FEMALEVACCINATED,
+    TRANSGENDERVACCINATED,
+    TOTALVACCINATED
+    )
+    values(
+    cov_vacc_stg_stream.UPDATEDON,
+    cov_vacc_stg_stream.STATE,
+    cov_vacc_stg_stream.TOTALDOSESADMINISTERED,
+    cov_vacc_stg_stream.FIRSTDOSESADMINISTERED,
+    cov_vacc_stg_stream.SECONDDOSESADMINISTERED,
+    cov_vacc_stg_stream.MALEDOSESADMINISTERED,
+    cov_vacc_stg_stream.FEMALEDOSESADMINISTERED,
+    cov_vacc_stg_stream.TRANSGENDERDOSESADMINISTERED,
+    cov_vacc_stg_stream.COVAXINDOSESADMINISTERED,
+    cov_vacc_stg_stream.COVISHEILDDOSESADMINISTERED,
+    cov_vacc_stg_stream.SPUTNIKDOSESADMINISTERED,
+    cov_vacc_stg_stream.Age_18_44YEARSVACCINATED,
+    cov_vacc_stg_stream.Age_45_60_YEARSVACCINATED,
+    cov_vacc_stg_stream.Age_60_125_YEARSVACCINATED,
+    cov_vacc_stg_stream.MALEVACCINATED,
+    cov_vacc_stg_stream.FEMALEVACCINATED,
+    cov_vacc_stg_stream.TRANSGENDERVACCINATED,
+    cov_vacc_stg_stream.TOTALVACCINATED
+    );
+
+
+Create or replace task task_covid_19_statewise_testing
+WAREHOUSE  = compute_wh
+SCHEDULE  = '3 MINUTE'
+WHEN
+  SYSTEM$STREAM_HAS_DATA('ETL_PROJECT_STAGING.PUBLIC.covid_19_statewise_testing_stream')
+As
+merge into ETL_PROJECT_FINAL.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS cov_st_test_final
+using ETL_PROJECT_STAGING.PUBLIC.covid_19_statewise_testing_stream cov_stg_stmt_testing_stream on
+cov_stg_stmt_testing_stream.TESTINGDATE = cov_st_test_final.TESTINGDATE and
+cov_stg_stmt_testing_stream.STATE = cov_st_test_final.STATE
+when matched
+    then update set
+    cov_st_test_final.TOTALSAMPLE = cov_stg_stmt_testing_stream.TOTALSAMPLE,
+	cov_st_test_final.NEGATIVE = cov_stg_stmt_testing_stream.NEGATIVE,
+	cov_st_test_final.POSITIVE = cov_stg_stmt_testing_stream.POSITIVE
+when not matched
+    then insert (
+    TESTINGDATE,
+	STATE,
+	TOTALSAMPLE,
+	NEGATIVE,
+	POSITIVE
+    )
+    Values(
+        cov_stg_stmt_testing_stream.TESTINGDATE,
+        cov_stg_stmt_testing_stream.STATE,
+        cov_stg_stmt_testing_stream.TOTALSAMPLE,
+        cov_stg_stmt_testing_stream.NEGATIVE,
+        cov_stg_stmt_testing_stream.POSITIVE
+    );
+
+ALTER TASK IF EXISTS task_covid_19 RESUME;
+ALTER TASK IF EXISTS task_covid_19_vaccine_statewise RESUME;
+ALTER TASK IF EXISTS task_covid_19_statewise_testing RESUME;
+
+-- Create Analytics table queries --
+------------------------------------------------------------------------------
+Create database ETL_PROJECT_Analytics;
+
+Use ETL_PROJECT_Analytics;
+
+Create or replace table monthly_covid_report(
+    comonth varchar(15),
+    coyear Number,
+    state varchar(15),
+    confirmedIndianNational Number,
+    confirmedForeignNational Number,
+    Cured Number,
+    Deaths Number,
+    Confirmed Number
+)
+comment = "This table consists of monthly data to track number of people getting covid belongs to india or not as well as number of deaths/cured/confirmed";
+
+Create or replace table quarterly_covid_report(
+    coquarter varchar(15),
+    coyear Number,
+    state varchar(15),
+    confirmedIndianNational Number,
+    confirmedForeignNational Number,
+    Cured Number,
+    Deaths Number,
+    Confirmed Number
+)
+comment = "This table consists of quarterly data to track number of people getting covid belongs to india or not as well as number of deaths/cured/confirmed";
+
+
+Create or replace table half_yearly_covid_report(
+    cohalf varchar(15),
+    coyear Number,
+    state varchar(15),
+    confirmedIndianNational Number,
+    confirmedForeignNational Number,
+    Cured Number,
+    Deaths Number,
+    Confirmed Number
+)
+comment = "This table consists of halfyearly data to track number of people getting covid belongs to india or not as well as number of deaths/cured/confirmed";
+
+Create or replace table monthly_covid_testing_statewise_report(
+    comonth varchar(15),
+    coyear Number,
+    state varchar,
+    totalsample Number,
+    positive Number,
+    Negative Number
+)
+comment = "This table consists of monthly data to track number of people getting tested for covid statewise";
+
+Create or replace table half_yearly_covid_testing_statewise_report(
+    cohalf varchar(15),
+    coyear Number,
+    state varchar,
+    totalsample Number,
+    positive Number,
+    Negative Number
+)
+comment = "This table consists of half yearly data to track number of people getting tested for covid statewise";
+
+Create or replace table quarterly_covid_testing_statewise_report(
+    coquarter varchar(15),
+    coyear Number,
+    state varchar,
+    totalsample Number,
+    positive Number,
+    Negative Number
+)
+comment = "This table consists of quarterly data to track number of people getting tested for covid statewise";
+
+
+Select * from ETL_PROJECT_FINAL.PUBLIC.COVID_19;
+Select distinct(COMONTH) from monthly_covid_testing_statewise_report;
+Select * from ETL_Project_Final.Public.COVID_19_STATEWISE_TESTING_DETAILS where STATE = 'Andaman and Nicobar Islands';
+
+delete from quarterly_covid_report;
+
+---------------- Helper Queries------------------------------------------------
+
+/*
+drop pipe if exists ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_Vaccine;
+drop pipe if exists ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19_statewise;
+drop pipe if exists ETL_PROJECT_STAGING.PUBLIC.s3_to_snowflake_covid_19;
+
+Alter file format ETL_PROJECT_STAGING.PUBLIC.covid_csv set field_delimiter = ',',
+record_delimiter = '\n',
+skip_header = 1,
+field_optionally_enclosed_by = '\042',
+null_if = ('\\N');
+
+drop stage if exists ETL_PROJECT_STAGING.PUBLIC.covid_s3_stage;
+drop stage if exists ETL_PROJECT_STAGING.PUBLIC.covid_vaccine_s3_stage;
+drop stage if exists ETL_PROJECT_STAGING.PUBLIC.covid_statewise_s3_stage;
+drop file format if exists ETL_PROJECT_STAGING.PUBLIC.covid_csv;
+
+drop table if exists ETL_PROJECT_STAGING.PUBLIC.COVID_19;
+drop table if exists ETL_PROJECT_STAGING.PUBLIC.COVID_19_VACCINE_STATEWISE;
+drop table if exists ETL_PROJECT_STAGING.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS;
+
+drop table if exists ETL_PROJECT_FINAL.PUBLIC.COVID_19;
+drop table if exists ETL_PROJECT_FINAL.PUBLIC.COVID_19_VACCINE_STATEWISE;
+drop table if exists ETL_PROJECT_FINAL.PUBLIC.COVID_19_STATEWISE_TESTING_DETAILS;
+
+Alter table ETL_PROJECT_STAGING.PUBLIC.COVID_19 alter SNO drop default;
+
+*/
